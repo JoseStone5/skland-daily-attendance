@@ -90,7 +90,7 @@ export function createMessageCollector(options: CreateMessageCollectorOptions): 
 
   const push = async () => {
     const title = '【森空岛每日签到】'
-    const content = messages.join('\n\n')
+    const content = messages.join('\n')
     const urls = options.notificationUrls ? toArray(options.notificationUrls) : []
 
     if (urls.length > 0) {
