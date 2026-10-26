@@ -17,29 +17,15 @@ export function formatCharacterName(character: AppBindingPlayer, appName?: strin
 }
 
 export function formatPrivacyName(character: AppBindingPlayer) {
-  // eslint-disable-next-line node/prefer-global/process
-  const isMinimalPrivacy = !!process.env.SKLAND_ANONYMOUS
-
-  // 终末地的昵称在 defaultRole 里取
+  // 终末地的昵称和等级从 defaultRole 获取
   if (character.gameId === 3) {
-    const nickname = isMinimalPrivacy ? '管理员' : maskNickname(character.defaultRole?.nickname || '')
+    const nickname = character.defaultRole?.nickname || ''
     return `${nickname} lv.${character.defaultRole?.level || 0}`
   }
 
-  const nickName = character.nickName
-  const [name, number] = nickName.split('#')
+  const [name, number] = character.nickName.split('#')
   if (!name)
     throw new Error('Unexpected Error: 明日方舟 nickName 格式不正确')
 
-  const displayName = isMinimalPrivacy ? '博士 ' : maskNickname(name)
-  return `${displayName}#${number}`
-}
-
-function maskNickname(name: string) {
-  if (name.length <= 1)
-    return '*'
-
-  const firstChar = name[0]
-  const stars = '*'.repeat(name.length - 1)
-  return `${firstChar}${stars}`
+  return `${name}#${number}`
 }
