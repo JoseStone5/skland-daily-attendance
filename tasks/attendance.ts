@@ -11,20 +11,20 @@ import { attendCharacter, createMessageCollector, generateAttendanceKey, getSpli
 interface GameStats {
   gameName: string
   total: number
-  succeeded: number // 本次签到成功
-  alreadyAttended: number // 今天已签到
-  failed: number // 签到失败
+  succeeded: number
+  alreadyAttended: number
+  failed: number
 }
 
 interface ExecutionStats {
   accounts: {
     total: number
-    successful: number // 所有角色都成功的账号
-    skipped: number // 今天已签到的账号
-    failed: number // 有失败的账号
+    successful: number
+    skipped: number
+    failed: number
     failedIndexes: number[]
   }
-  charactersByGame: Map<number, GameStats> // key: gameId
+  charactersByGame: Map<number, GameStats>
 }
 
 interface ProcessAccountResult {
@@ -40,48 +40,39 @@ interface AttendanceContext {
   totalAccounts: number
 }
 
-// Create attendance context instance
 const attendanceContext = createContext<AttendanceContext>({
   asyncContext: true,
   AsyncLocalStorage,
 })
 
-// Export composable function for accessing context
 const useAttendanceContext = attendanceContext.use
-
 const ATTENDANCE_AVAILABLE_APPCODE = ['arknights', 'endfield']
 
 async function processAccount(
   token: string,
   accountNumber: number,
 ): Promise<ProcessAccountResult> {
-  // Get all dependencies from context
   const { stats, messageCollector, storage, maxRetries, totalAccounts } = useAttendanceContext()
-  // Check if already attended today
   const attendanceKey = await generateAttendanceKey(token)
   const hasAttended = await storage.getItem(attendanceKey)
 
+  messageCollector.notify(`账号 ${accountNumber}/${totalAccounts}`)
+
   if (hasAttended) {
-    messageCollector.notify(`\n--- 账号 ${accountNumber}/${totalAccounts} ---`)
-    messageCollector.info(`今天已经签到过，跳过`)
+    messageCollector.info('账号今日已完成签到，跳过')
     stats.accounts.skipped++
     return { accountHasError: false, charactersCount: 0 }
   }
-
-  messageCollector.notify(`\n--- 账号 ${accountNumber}/${totalAccounts} ---`)
-  messageCollector.info(`开始处理...`)
 
   const client = createClient()
   const { code } = await client.collections.hypergryph.grantAuthorizeCode(token)
   await client.signIn(code)
 
   const { list } = await client.collections.player.getBinding()
-  // Build character list with game information preserved
   const characterList = list
     .filter(i => ATTENDANCE_AVAILABLE_APPCODE.includes(i.appCode))
     .flatMap((binding) => {
       if (binding.appCode === 'endfield') {
-        // 终末地按单个角色展开，与明日方舟不同，每个 role 需要独立签到
         return binding.bindingList.flatMap(player =>
           player.roles.length > 0
             ? player.roles.map(role => ({ ...player, defaultRole: role, roles: [role] }))
@@ -92,8 +83,8 @@ async function processAccount(
     })
 
   let accountHasError = false
+
   for (const character of characterList) {
-    // Initialize game stats if not exists
     if (!stats.charactersByGame.has(character.gameId)) {
       stats.charactersByGame.set(character.gameId, {
         gameName: character.gameName,
@@ -112,10 +103,9 @@ async function processAccount(
       character,
       maxRetries,
       character.gameName,
-      retriesLeft => messageCollector.log(`操作失败，剩余重试次数: ${retriesLeft}`),
+      retriesLeft => messageCollector.log(`重试中，剩余次数：${retriesLeft}`),
     )
 
-    // Collect message to notification
     if (result.hasError) {
       messageCollector.infoError(result.message)
       gameStats.failed++
@@ -127,13 +117,11 @@ async function processAccount(
         gameStats.succeeded++
       }
       else {
-        // Already attended today
         gameStats.alreadyAttended++
       }
     }
   }
 
-  // Save attendance status only if all characters succeeded
   if (!accountHasError) {
     await storage.setItem(attendanceKey, true)
     stats.accounts.successful++
@@ -151,29 +139,22 @@ export default defineTask<'success' | 'failed'>({
     name: 'attendance',
     description: '每日签到',
   },
+
   async run() {
     const config = useRuntimeConfig()
-
     const tokens = getSplitByComma(config.tokens)
-
     const notificationUrls = getSplitByComma(config.notificationUrls)
 
-    const messageCollector = createMessageCollector({
-      notificationUrls,
-    })
+    const messageCollector = createMessageCollector({ notificationUrls })
 
     if (tokens.length === 0) {
-      messageCollector.log('未配置任何账号，跳过签到任务')
+      messageCollector.log('未配置账号，跳过签到')
       return { result: 'success' }
     }
 
     const storage = useStorage()
-
-    messageCollector.notify('## 森空岛每日签到')
-
     const maxRetries = Number(config.maxRetries)
 
-    // Initialize statistics
     const stats: ExecutionStats = {
       accounts: {
         total: tokens.length,
@@ -195,24 +176,22 @@ export default defineTask<'success' | 'failed'>({
       totalAccounts: tokens.length,
     }
 
-    // Create context scope for async operations
     await attendanceContext.call(ctx, async () => {
-      // Process each account within the context
       for (const [index, token] of tokens.entries()) {
         const accountNumber = index + 1
 
         try {
           const result = await processAccount(token, accountNumber)
-
-          if (result.accountHasError) {
+          if (result.accountHasError)
             hasFailed = true
-          }
         }
         catch (error) {
           const { stats, messageCollector } = useAttendanceContext()
           const errorMessage = error instanceof Error ? error.message : String(error)
-          messageCollector.notify(`\n--- 账号 ${accountNumber}/${tokens.length} ---`)
-          messageCollector.infoError(`处理失败: ${errorMessage}`)
+
+          messageCollector.notify(`账号 ${accountNumber}/${tokens.length}`)
+          messageCollector.infoError(`处理失败：${errorMessage}`)
+
           hasFailed = true
           stats.accounts.failed++
           stats.accounts.failedIndexes.push(accountNumber)
@@ -220,27 +199,28 @@ export default defineTask<'success' | 'failed'>({
       }
     })
 
-    // Output execution summary
-    messageCollector.notify(`\n========== 执行摘要 ==========`)
-    messageCollector.notify(`账号统计:`)
-    messageCollector.notify(`  • 总数: ${stats.accounts.total}`)
-    messageCollector.notify(`  • 成功: ${stats.accounts.successful}`)
-    messageCollector.notify(`  • 跳过: ${stats.accounts.skipped}`)
-    if (stats.accounts.failed > 0) {
-      messageCollector.notifyError(`  • 失败: ${stats.accounts.failed} (账号 #${stats.accounts.failedIndexes.join(', #')})`)
+    messageCollector.notify('签到摘要')
+    messageCollector.notify(
+      `账号：${stats.accounts.total} 个｜成功 ${stats.accounts.successful}｜跳过 ${stats.accounts.skipped}｜失败 ${stats.accounts.failed}`,
+    )
+
+    if (stats.accounts.failedIndexes.length > 0) {
+      messageCollector.notifyError(
+        `失败账号：#${stats.accounts.failedIndexes.join('、#')}`,
+      )
     }
 
-    // Output game-specific statistics
-    if (stats.charactersByGame.size > 0) {
-      for (const gameStats of stats.charactersByGame.values()) {
-        messageCollector.notify(`\n【${gameStats.gameName}】角色统计:`)
-        messageCollector.notify(`  • 总数: ${gameStats.total}`)
-        messageCollector.notify(`  • 本次签到成功: ${gameStats.succeeded}`)
-        messageCollector.notify(`  • 今天已签到: ${gameStats.alreadyAttended}`)
-        if (gameStats.failed > 0) {
-          messageCollector.notifyError(`  • 签到失败: ${gameStats.failed}`)
-        }
-      }
+    for (const gameStats of stats.charactersByGame.values()) {
+      const parts = [
+        `角色 ${gameStats.total}`,
+        `成功 ${gameStats.succeeded}`,
+        `已签到 ${gameStats.alreadyAttended}`,
+      ]
+
+      if (gameStats.failed > 0)
+        parts.push(`失败 ${gameStats.failed}`)
+
+      messageCollector.notify(`${gameStats.gameName}：${parts.join('｜')}`)
     }
 
     if (stats.accounts.successful > 0 || stats.accounts.failed > 0)
