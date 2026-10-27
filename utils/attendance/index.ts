@@ -31,6 +31,12 @@ function withStatusMark(
   return `${mark} ${message}`
 }
 
+const ALREADY_ATTENDED_KEYWORDS = ['跳过签到', '已经签到']
+
+function isAlreadyAttendedMessage(message: string): boolean {
+  return ALREADY_ATTENDED_KEYWORDS.some(k => message.includes(k))
+}
+
 /**
  * Core attendance function
  */
@@ -49,8 +55,8 @@ async function attendance(
       success: false,
       message: withStatusMark(
         `${characterLabel} 不支持的游戏 (gameId: ${character.gameId})`,
-        characterLabel,
-        false,
+                              characterLabel,
+                              false,
       ),
       hasError: true,
     }
@@ -79,9 +85,16 @@ async function attendance(
     characterLabel,
   })
 
+  // 已签到也算成功：修正 success / hasError，并渲染 ✅
+  const alreadyAttended = isAlreadyAttendedMessage(result.message)
+  const isSuccess = result.success || alreadyAttended
+  const hasError = alreadyAttended ? false : result.hasError
+
   return {
     ...result,
-    message: withStatusMark(result.message, characterLabel, result.success),
+    success: isSuccess,
+    hasError,
+    message: withStatusMark(result.message, characterLabel, isSuccess),
   }
 }
 
