@@ -9,32 +9,36 @@ export * from './shared'
 // Export types and utility functions
 export * from './types'
 
-function getStatusMark(success: boolean): string {
-  return success ? '✅' : '❌'
+const ALREADY_ATTENDED_KEYWORDS = ['已签到', '今日已签到', '已经签到']
+
+function isAlreadyAttendedMessage(message: string): boolean {
+  return ALREADY_ATTENDED_KEYWORDS.some(k => message.includes(k))
+}
+
+const NO_CHARACTER_KEYWORDS = ['没有角色']
+
+function isNoCharacterMessage(message: string): boolean {
+  return NO_CHARACTER_KEYWORDS.some(k => message.includes(k))
 }
 
 /**
- * 在消息中的角色标签前插入状态标记
- * 例如：【明日方舟】官服角色 xxx#1234 签到成功
- *   -> ✅【明日方舟】官服角色 xxx#1234 签到成功
+ * 已签到 或 成功 -> ✅，其余 -> ❌
  */
+function getStatusMark(success: boolean, alreadyAttended: boolean): string {
+  return success || alreadyAttended ? '✅' : '❌'
+}
+
 function withStatusMark(
   message: string,
   characterLabel: string,
   success: boolean,
+  alreadyAttended: boolean,
 ): string {
-  const mark = getStatusMark(success)
+  const mark = getStatusMark(success, alreadyAttended)
   if (message.includes(characterLabel)) {
     return message.replace(characterLabel, `${mark} ${characterLabel}`)
   }
-  // 兜底：即使 handler 返回的消息不以角色标签开头，也保证有标记
   return `${mark} ${message}`
-}
-
-const ALREADY_ATTENDED_KEYWORDS = ['跳过签到', '已经签到']
-
-function isAlreadyAttendedMessage(message: string): boolean {
-  return ALREADY_ATTENDED_KEYWORDS.some(k => message.includes(k))
 }
 
 /**
@@ -57,6 +61,7 @@ async function attendance(
         `${characterLabel} 不支持的游戏 (gameId: ${character.gameId})`,
                               characterLabel,
                               false,
+                              false,
       ),
       hasError: true,
     }
@@ -72,6 +77,7 @@ async function attendance(
           `${characterLabel} ${validation.reason || '验证失败'}，跳过签到`,
           characterLabel,
           false,
+          false,
         ),
         hasError: false,
       }
@@ -85,16 +91,21 @@ async function attendance(
     characterLabel,
   })
 
-  // 已签到也算成功：修正 success / hasError，并渲染 ✅
+  // 没有角色：不显示这一行（返回空消息，由 message collector 过滤）
+  if (isNoCharacterMessage(result.message)) {
+    return {
+      ...result,
+      message: '',
+    }
+  }
+
+  // 已签到：显示 ✅，但 success / hasError 保持 handler 原值，
+  // 以免影响 tasks/attendance.ts 里的摘要统计
   const alreadyAttended = isAlreadyAttendedMessage(result.message)
-  const isSuccess = result.success || alreadyAttended
-  const hasError = alreadyAttended ? false : result.hasError
 
   return {
     ...result,
-    success: isSuccess,
-    hasError,
-    message: withStatusMark(result.message, characterLabel, isSuccess),
+    message: withStatusMark(result.message, characterLabel, result.success, alreadyAttended),
   }
 }
 
@@ -123,6 +134,7 @@ export async function attendCharacter(
       message: withStatusMark(
         `${characterLabel} 签到过程中出现未知错误: ${errorMessage}`,
         characterLabel,
+        false,
         false,
       ),
       hasError: true,
