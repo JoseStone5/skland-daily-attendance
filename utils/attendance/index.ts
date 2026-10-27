@@ -9,6 +9,28 @@ export * from './shared'
 // Export types and utility functions
 export * from './types'
 
+function getStatusMark(success: boolean): string {
+  return success ? '✅' : '❌'
+}
+
+/**
+ * 在消息中的角色标签前插入状态标记
+ * 例如：【明日方舟】官服角色 xxx#1234 签到成功
+ *   -> ✅【明日方舟】官服角色 xxx#1234 签到成功
+ */
+function withStatusMark(
+  message: string,
+  characterLabel: string,
+  success: boolean,
+): string {
+  const mark = getStatusMark(success)
+  if (message.includes(characterLabel)) {
+    return message.replace(characterLabel, `${mark} ${characterLabel}`)
+  }
+  // 兜底：即使 handler 返回的消息不以角色标签开头，也保证有标记
+  return `${mark} ${message}`
+}
+
 /**
  * Core attendance function
  */
@@ -25,7 +47,11 @@ async function attendance(
   if (!handlerConfig) {
     return {
       success: false,
-      message: `${characterLabel} 不支持的游戏 (gameId: ${character.gameId})`,
+      message: withStatusMark(
+        `${characterLabel} 不支持的游戏 (gameId: ${character.gameId})`,
+        characterLabel,
+        false,
+      ),
       hasError: true,
     }
   }
@@ -36,18 +62,27 @@ async function attendance(
     if (!validation.valid) {
       return {
         success: false,
-        message: `${characterLabel} ${validation.reason || '验证失败'}，跳过签到`,
+        message: withStatusMark(
+          `${characterLabel} ${validation.reason || '验证失败'}，跳过签到`,
+          characterLabel,
+          false,
+        ),
         hasError: false,
       }
     }
   }
 
   // Execute attendance
-  return await handlerConfig.handler({
+  const result = await handlerConfig.handler({
     client,
     character,
     characterLabel,
   })
+
+  return {
+    ...result,
+    message: withStatusMark(result.message, characterLabel, result.success),
+  }
 }
 
 /**
@@ -60,18 +95,23 @@ export async function attendCharacter(
   appName?: string,
   onRetry?: (retriesLeft: number) => void,
 ): Promise<AttendanceHandlerResult> {
+  const characterLabel = formatCharacterName(character, appName)
+
   try {
-    return retry(() => attendance(client, character, appName), {
+    return await retry(() => attendance(client, character, appName), {
       retries: maxRetries,
       onRetry: onRetry ? retriesLeft => onRetry(retriesLeft) : undefined,
     })
   }
   catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    const characterLabel = formatCharacterName(character, appName)
     return {
       success: false,
-      message: `${characterLabel} 签到过程中出现未知错误: ${errorMessage}`,
+      message: withStatusMark(
+        `${characterLabel} 签到过程中出现未知错误: ${errorMessage}`,
+        characterLabel,
+        false,
+      ),
       hasError: true,
     }
   }
