@@ -6,7 +6,7 @@ import { useStorage } from 'nitro/storage'
 import { defineTask } from 'nitro/task'
 import { createClient } from 'skland-kit'
 import { createContext } from 'unctx'
-import { attendCharacter, createMessageCollector, generateAttendanceKey, getSplitByComma } from '~/utils/index'
+import { attendCharacter, createMessageCollector, generateAttendanceKey, getSplitByComma, retry } from '~/utils/index'
 
 interface GameStats {
   gameName: string
@@ -65,10 +65,15 @@ async function processAccount(
   }
 
   const client = createClient()
-  const { code } = await client.collections.hypergryph.grantAuthorizeCode(token)
-  await client.signIn(code)
-
-  const { list } = await client.collections.player.getBinding()
+  const { list } = await retry(async () => {
+    const { code } = await client.collections.hypergryph.grantAuthorizeCode(token)
+    await client.signIn(code)
+    return client.collections.player.getBinding()
+  }, {
+    retries: maxRetries,
+    delay: 3000,
+    onRetry: retriesLeft => messageCollector.log(`登录重试中，剩余次数：${retriesLeft}`),
+  })
   const characterList = list
     .filter(i => ATTENDANCE_AVAILABLE_APPCODE.includes(i.appCode))
     .flatMap((binding) => {
