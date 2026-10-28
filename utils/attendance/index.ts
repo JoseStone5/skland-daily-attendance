@@ -70,11 +70,16 @@ async function attendance(
   // Validate character (if validation function exists)
   if (handlerConfig.validate) {
     const validation = handlerConfig.validate(character)
-    if (!validation.valid) {
+      if (!validation.valid) {
+      const reason = validation.reason || '验证失败'
+      // 没有角色：不显示这一行，也不计入统计
+      if (isNoCharacterMessage(reason)) {
+        return { success: false, message: '', hasError: false, skipped: true }
+      }
       return {
         success: false,
         message: withStatusMark(
-          `${characterLabel} ${validation.reason || '验证失败'}，跳过签到`,
+          `${characterLabel} ${reason}，跳过签到`,
           characterLabel,
           false,
           false,
@@ -96,6 +101,7 @@ async function attendance(
     return {
       ...result,
       message: '',
+      skipped: true,
     }
   }
 

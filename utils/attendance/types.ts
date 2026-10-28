@@ -10,6 +10,7 @@ export interface AttendanceHandlerResult {
   success: boolean
   message: string
   hasError: boolean
+  skipped: boolean
 }
 
 export type AttendanceHandler = (

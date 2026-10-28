@@ -83,8 +83,23 @@ async function processAccount(
     })
 
   let accountHasError = false
+  let validCharactersCount = 0
 
   for (const character of characterList) {
+    const result = await attendCharacter(
+      client,
+      character,
+      maxRetries,
+      character.gameName,
+      retriesLeft => messageCollector.log(`重试中，剩余次数：${retriesLeft}`),
+                                              +    )
+
+    // 没有角色：不显示、不统计
+    if (result.skipped)
+      continue
+
+    validCharactersCount++
+
     if (!stats.charactersByGame.has(character.gameId)) {
       stats.charactersByGame.set(character.gameId, {
         gameName: character.gameName,
@@ -97,14 +112,6 @@ async function processAccount(
 
     const gameStats = stats.charactersByGame.get(character.gameId)!
     gameStats.total++
-
-    const result = await attendCharacter(
-      client,
-      character,
-      maxRetries,
-      character.gameName,
-      retriesLeft => messageCollector.log(`重试中，剩余次数：${retriesLeft}`),
-    )
 
     if (result.hasError) {
       messageCollector.infoError(result.message)
@@ -131,7 +138,7 @@ async function processAccount(
     stats.accounts.failedIndexes.push(accountNumber)
   }
 
-  return { accountHasError, charactersCount: characterList.length }
+  return { accountHasError, charactersCount: validCharactersCount }
 }
 
 export default defineTask<'success' | 'failed'>({
