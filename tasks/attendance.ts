@@ -92,7 +92,7 @@ async function processAccount(
       maxRetries,
       character.gameName,
       retriesLeft => messageCollector.log(`重试中，剩余次数：${retriesLeft}`),
-                                              +    )
+    )
 
     // 没有角色：不显示、不统计
     if (result.skipped)
